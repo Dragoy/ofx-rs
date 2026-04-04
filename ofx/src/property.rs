@@ -1028,6 +1028,15 @@ property! { kOfxImageEffectPropResolvePage as ResolvePage {
 	get_resolve_page() -> String;
 }}
 
+/// Resolve 20 specific extension
+property! { kOfxImageEffectPropSrcFilePath as SrcFilePath {
+	get_src_file_path() -> String;
+}}
+/// Resolve 20 specific extension
+property! { kOfxImageEffectPropSrcFrame as SrcFrame {
+	get_src_frame() -> Int;
+}}
+
 property! { kOfxImageEffectInstancePropEffectDuration as EffectDuration {
 	get_effect_duration() -> Double;
 	set_effect_duration(Double);
@@ -1347,6 +1356,7 @@ object_properties! { EffectInstance {
 	ProjectPixelAspectRatio		read,
 	EffectDuration				read,
 	ResolvePage  				read,
+	SrcFilePath  				read,
 	SequentialRender			read+write,
 	SupportsTiles				read+write,
 	SupportsMultiResolution		read+write,
@@ -1511,6 +1521,7 @@ object_properties! { EndInstanceChangedInArgs {
 
 object_properties! { RenderInArgs {
 	TimeProp					read,
+	SrcFrame  			     	read,
 	FieldToRender				read,
 	RenderWindow				read,
 	RenderScale					read,

@@ -31,3 +31,5 @@ enum eOfxStatus {
 #define kOfxImageEffectPropMetalCommandQueue "OfxImageEffectPropMetalCommandQueue"
 
 #define kOfxImageEffectPropResolvePage "OfxImageEffectPropResolvePage"
+#define kOfxImageEffectPropSrcFilePath "OfxImageEffectPropSrcFilePath"
+#define kOfxImageEffectPropSrcFrame "OfxImageEffectPropSrcFrame"
