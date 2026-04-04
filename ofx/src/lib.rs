@@ -30,17 +30,17 @@ mod image;
 pub use action::*;
 pub use enums::*;
 pub use handle::*;
+pub use image::*;
 pub use plugin::*;
 pub use property::*;
+use registry::*;
 pub use result::*;
 pub use types::*;
 pub use util::*;
-pub use image::*;
-use registry::*;
 
 pub use ofx_sys::{OfxHost, OfxPlugin, OfxPropertySetHandle};
 pub use registry::{
-	get_registry, init_registry, main_entry_for_plugin, set_host_for_plugin, Registry,
+    Registry, init_registry, main_entry_for_plugin, set_host_for_plugin, with_registry,
 };
 
 #[macro_export]
@@ -54,4 +54,3 @@ macro_rules! register_modules {
 		build_plugin_registry!(register_plugins);
 	};
 }
-
