@@ -86,6 +86,8 @@ pub trait ParamHandleValue: Default + Clone {}
 impl ParamHandleValue for Int {}
 impl ParamHandleValue for Bool {}
 impl ParamHandleValue for Double {}
+impl ParamHandleValue for ParamRGBColourD {}
+impl ParamHandleValue for ParamRGBAColourD {}
 impl ParamHandleValue for String {}
 
 pub trait ParamHandleValueDefault: ParamHandleValue + Default {}
@@ -109,6 +111,11 @@ pub struct ParamSetHandle {
     inner: OfxParamSetHandle,
     property: Arc<OfxPropertySuiteV1>,
     parameter: Arc<OfxParameterSuiteV1>,
+}
+
+pub struct ParamEditGuard<'a> {
+    param_set: &'a ParamSetHandle,
+    active: bool,
 }
 
 // TODO: custom_derive?
@@ -239,6 +246,54 @@ impl ParamHandle<Bool> {
 
     pub fn set_value_at_time(&self, time: Time, value: Bool) -> Result<()> {
         suite_fn!(paramSetValueAtTime in self.parameter; self.inner, time, value as Int)?;
+        Ok(())
+    }
+}
+
+impl ParamHandle<ParamRGBColourD> {
+    pub fn get_value(&self) -> Result<ParamRGBColourD> {
+        let mut value: ParamRGBColourD = ParamRGBColourD::default();
+        suite_fn!(paramGetValue in self.parameter; self.inner, &mut value.r as *mut Double, &mut value.g as *mut Double, &mut value.b as *mut Double)?;
+        Ok(value)
+    }
+
+    pub fn get_value_at_time(&self, time: Time) -> Result<ParamRGBColourD> {
+        let mut value: ParamRGBColourD = ParamRGBColourD::default();
+        suite_fn!(paramGetValueAtTime in self.parameter; self.inner, time, &mut value.r as *mut Double, &mut value.g as *mut Double, &mut value.b as *mut Double)?;
+        Ok(value)
+    }
+
+    pub fn set_value(&self, value: ParamRGBColourD) -> Result<()> {
+        suite_fn!(paramSetValue in self.parameter; self.inner, value.r, value.g, value.b)?;
+        Ok(())
+    }
+
+    pub fn set_value_at_time(&self, time: Time, value: ParamRGBColourD) -> Result<()> {
+        suite_fn!(paramSetValueAtTime in self.parameter; self.inner, time, value.r, value.g, value.b)?;
+        Ok(())
+    }
+}
+
+impl ParamHandle<ParamRGBAColourD> {
+    pub fn get_value(&self) -> Result<ParamRGBAColourD> {
+        let mut value: ParamRGBAColourD = unsafe { std::mem::zeroed() };
+        suite_fn!(paramGetValue in self.parameter; self.inner, &mut value.r as *mut Double, &mut value.g as *mut Double, &mut value.b as *mut Double, &mut value.a as *mut Double)?;
+        Ok(value)
+    }
+
+    pub fn get_value_at_time(&self, time: Time) -> Result<ParamRGBAColourD> {
+        let mut value: ParamRGBAColourD = unsafe { std::mem::zeroed() };
+        suite_fn!(paramGetValueAtTime in self.parameter; self.inner, time, &mut value.r as *mut Double, &mut value.g as *mut Double, &mut value.b as *mut Double, &mut value.a as *mut Double)?;
+        Ok(value)
+    }
+
+    pub fn set_value(&self, value: ParamRGBAColourD) -> Result<()> {
+        suite_fn!(paramSetValue in self.parameter; self.inner, value.r, value.g, value.b, value.a)?;
+        Ok(())
+    }
+
+    pub fn set_value_at_time(&self, time: Time, value: ParamRGBAColourD) -> Result<()> {
+        suite_fn!(paramSetValueAtTime in self.parameter; self.inner, time, value.r, value.g, value.b, value.a)?;
         Ok(())
     }
 }
@@ -567,6 +622,8 @@ properties_newtype!(EndSequenceRenderInArgs);
 properties_newtype!(ParamDouble);
 properties_newtype!(ParamInt);
 properties_newtype!(ParamBoolean);
+properties_newtype!(ParamRGB);
+properties_newtype!(ParamRGBA);
 properties_newtype!(ParamString);
 properties_newtype!(ParamPage);
 properties_newtype!(ParamGroup);
@@ -748,6 +805,25 @@ impl ParamSetHandle {
         }
     }
 
+    pub fn edit_guard(&self, name: &str) -> Result<ParamEditGuard<'_>> {
+        self.edit_begin(name)?;
+        Ok(ParamEditGuard {
+            param_set: self,
+            active: true,
+        })
+    }
+
+    pub fn edit_begin(&self, name: &str) -> Result<()> {
+        let name_buf = CString::new(name)?;
+        suite_fn!(paramEditBegin in self.parameter; self.inner, name_buf.as_ptr())?;
+        Ok(())
+    }
+
+    pub fn edit_end(&self) -> Result<()> {
+        suite_fn!(paramEditEnd in self.parameter; self.inner)?;
+        Ok(())
+    }
+
     fn param_define<T>(&mut self, param_type: ParamType, name: &str) -> Result<T>
     where
         T: IsPropertiesNewType,
@@ -786,6 +862,21 @@ impl ParamSetHandle {
         ))
     }
 
+    pub fn parameter_group_properties(&self, name: &str) -> Result<ParamGroup> {
+        let name_buf = CString::new(name)?.into_bytes_with_nul();
+        let param_properties = {
+            let mut param_handle = std::ptr::null_mut();
+            let mut param_properties = std::ptr::null_mut();
+            suite_fn!(paramGetHandle in self.parameter;
+				self.inner, name_buf.as_ptr() as *const _, &mut param_handle as *mut _, &mut param_properties as *mut _)?;
+            param_properties
+        };
+        Ok(ParamGroup::wrap(PropertySetHandle::new(
+            param_properties,
+            self.property.clone(),
+        )))
+    }
+
     pub fn param_define_double(&mut self, name: &str) -> Result<ParamDouble> {
         self.param_define(ParamType::Double, name)
     }
@@ -796,6 +887,14 @@ impl ParamSetHandle {
 
     pub fn param_define_boolean(&mut self, name: &str) -> Result<ParamBoolean> {
         self.param_define(ParamType::Boolean, name)
+    }
+
+    pub fn param_define_rgb(&mut self, name: &str) -> Result<ParamRGB> {
+        self.param_define(ParamType::RGB, name)
+    }
+
+    pub fn param_define_rgba(&mut self, name: &str) -> Result<ParamRGBA> {
+        self.param_define(ParamType::RGBA, name)
     }
 
     pub fn param_define_string(&mut self, name: &str) -> Result<ParamString> {
@@ -816,6 +915,21 @@ impl ParamSetHandle {
 
     pub fn param_define_choice(&mut self, name: &str) -> Result<ParamChoice> {
         self.param_define(ParamType::Choice, name)
+    }
+}
+
+impl ParamEditGuard<'_> {
+    pub fn finish(mut self) -> Result<()> {
+        self.active = false;
+        self.param_set.edit_end()
+    }
+}
+
+impl Drop for ParamEditGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.param_set.edit_end();
+        }
     }
 }
 

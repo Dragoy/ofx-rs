@@ -450,6 +450,8 @@ impl ValueType for Int {}
 impl ValueType for Double {}
 impl ValueType for PointI {}
 impl ValueType for PointD {}
+impl ValueType for ParamRGBColourD {}
+impl ValueType for ParamRGBAColourD {}
 impl ValueType for RangeI {}
 impl ValueType for RangeD {}
 impl ValueType for RectI {}
@@ -534,6 +536,20 @@ raw_getter_impl! { |readable, c_name, index| -> Double {
 raw_getter_impl! { |readable, c_name, index| -> PointD {
 	let mut c_struct_out: PointD = unsafe { std::mem::zeroed() };
 	to_result! { suite_call!(propGetDoubleN in *readable.suite(); readable.handle(), c_name, POINT_ELEMENTS, &mut c_struct_out.x as *mut Double)
+	=> c_struct_out}
+}}
+
+const RGB_ELEMENTS: Int = 3;
+raw_getter_impl! { |readable, c_name, index| -> ParamRGBColourD {
+	let mut c_struct_out: ParamRGBColourD = unsafe { std::mem::zeroed() };
+	to_result! { suite_call!(propGetDoubleN in *readable.suite(); readable.handle(), c_name, RGB_ELEMENTS, &mut c_struct_out.r as *mut Double)
+	=> c_struct_out}
+}}
+
+const RGBA_ELEMENTS: Int = 4;
+raw_getter_impl! { |readable, c_name, index| -> ParamRGBAColourD {
+	let mut c_struct_out: ParamRGBAColourD = unsafe { std::mem::zeroed() };
+	to_result! { suite_call!(propGetDoubleN in *readable.suite(); readable.handle(), c_name, RGBA_ELEMENTS, &mut c_struct_out.r as *mut Double)
 	=> c_struct_out}
 }}
 
@@ -639,6 +655,16 @@ raw_setter_impl! { |writable, c_name, index, value: &Double| {
 raw_setter_impl! { |writable, c_name, index, value: &PointD| {
 	trace_setter!(writable.handle(), c_name, index, value);
 	suite_fn!(propSetDoubleN in *writable.suite(); writable.handle(), c_name, POINT_ELEMENTS,  &value.x as *const Double)
+}}
+
+raw_setter_impl! { |writable, c_name, index, value: &ParamRGBColourD| {
+	trace_setter!(writable.handle(), c_name, index, value);
+	suite_fn!(propSetDoubleN in *writable.suite(); writable.handle(), c_name, RGB_ELEMENTS,  &value.r as *const Double)
+}}
+
+raw_setter_impl! { |writable, c_name, index, value: &ParamRGBAColourD| {
+	trace_setter!(writable.handle(), c_name, index, value);
+	suite_fn!(propSetDoubleN in *writable.suite(); writable.handle(), c_name, RGBA_ELEMENTS,  &value.r as *const Double)
 }}
 
 raw_setter_impl! { |writable, c_name, index, value: &RangeD| {
@@ -1166,8 +1192,30 @@ pub mod double {
 	use super::*;
 	property_assign_name!(kOfxParamPropDoubleType as DoubleType: (&[u8]) -> CString);
 	property_assign_name!(kOfxParamPropDefault as Default: Double);
+	property_assign_name!(kOfxParamPropIncrement as Increment: Double);
+	property_assign_name!(kOfxParamPropMax as Max: Double);
+	property_assign_name!(kOfxParamPropMin as Min: Double);
 	property_assign_name!(kOfxParamPropDisplayMax as DisplayMax: Double);
 	property_assign_name!(kOfxParamPropDisplayMin as DisplayMin: Double);
+}
+
+pub mod integer {
+	use super::*;
+	property_assign_name!(kOfxParamPropDefault as Default: Int);
+	property_assign_name!(kOfxParamPropMax as Max: Int);
+	property_assign_name!(kOfxParamPropMin as Min: Int);
+	property_assign_name!(kOfxParamPropDisplayMax as DisplayMax: Int);
+	property_assign_name!(kOfxParamPropDisplayMin as DisplayMin: Int);
+}
+
+pub mod rgb {
+	use super::*;
+	property_assign_name!(kOfxParamPropDefault as Default: ParamRGBColourD);
+}
+
+pub mod rgba {
+	use super::*;
+	property_assign_name!(kOfxParamPropDefault as Default: ParamRGBAColourD);
 }
 
 pub mod boolean {
@@ -1237,12 +1285,49 @@ pub mod DoubleParams {
 	pub trait CanSet: Writable {
 		property_define_setter_trait!(set_double_type, double::DoubleType, enum ParamDoubleType);
 		property_define_setter_trait!(set_default, double::Default);
+		property_define_setter_trait!(set_increment, double::Increment);
+		property_define_setter_trait!(set_max, double::Max);
+		property_define_setter_trait!(set_min, double::Min);
 		property_define_setter_trait!(set_display_max, double::DisplayMax);
 		property_define_setter_trait!(set_display_min, double::DisplayMin);
 	}
 }
 
 pub use DoubleParams::CanSet as CanSetDoubleParams;
+
+#[allow(non_snake_case)]
+pub mod IntegerParams {
+	use super::*;
+	pub trait CanSet: Writable {
+		property_define_setter_trait!(set_default, integer::Default);
+		property_define_setter_trait!(set_max, integer::Max);
+		property_define_setter_trait!(set_min, integer::Min);
+		property_define_setter_trait!(set_display_max, integer::DisplayMax);
+		property_define_setter_trait!(set_display_min, integer::DisplayMin);
+	}
+}
+
+pub use IntegerParams::CanSet as CanSetIntegerParams;
+
+#[allow(non_snake_case)]
+pub mod RgbParams {
+	use super::*;
+	pub trait CanSet: Writable {
+		property_define_setter_trait!(set_default, rgb::Default);
+	}
+}
+
+pub use RgbParams::CanSet as CanSetRgbParams;
+
+#[allow(non_snake_case)]
+pub mod RgbaParams {
+	use super::*;
+	pub trait CanSet: Writable {
+		property_define_setter_trait!(set_default, rgba::Default);
+	}
+}
+
+pub use RgbaParams::CanSet as CanSetRgbaParams;
 
 #[allow(non_snake_case)]
 pub mod BooleanParams {
@@ -1431,9 +1516,24 @@ object_properties! { ParamDouble {
 	DoubleParams				write,
 }}
 
+object_properties! { ParamInt {
+	CommonParameters			inherit,
+	IntegerParams				write,
+}}
+
 object_properties! { ParamBoolean {
 	CommonParameters			inherit,
 	BooleanParams				write,
+}}
+
+object_properties! { ParamRGB {
+	CommonParameters			inherit,
+	RgbParams					write,
+}}
+
+object_properties! { ParamRGBA {
+	CommonParameters			inherit,
+	RgbaParams					write,
 }}
 
 object_properties! { ParamString {

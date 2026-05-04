@@ -35,6 +35,21 @@ pub type RGBColourB = ofx_sys::OfxRGBColourB;
 pub type RGBColourS = ofx_sys::OfxRGBColourS;
 pub type RGBColourF = ofx_sys::OfxRGBColourF;
 pub type RGBColourD = ofx_sys::OfxRGBColourD;
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct ParamRGBColourD {
+	pub r: Double,
+	pub g: Double,
+	pub b: Double,
+}
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct ParamRGBAColourD {
+	pub r: Double,
+	pub g: Double,
+	pub b: Double,
+	pub a: Double,
+}
 pub type YUVAColourB = ofx_sys::OfxYUVAColourB;
 pub type YUVAColourS = ofx_sys::OfxYUVAColourS;
 pub type YUVAColourF = ofx_sys::OfxYUVAColourF;

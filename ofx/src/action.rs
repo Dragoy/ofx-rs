@@ -76,6 +76,8 @@ pub enum Action {
 	BeginInstanceChanged(ImageEffectHandle, BeginInstanceChangedInArgs),
 	InstanceChanged(ImageEffectHandle, InstanceChangedInArgs),
 	EndInstanceChanged(ImageEffectHandle, EndInstanceChangedInArgs),
+	BeginInstanceEdit(ImageEffectHandle),
+	EndInstanceEdit(ImageEffectHandle),
 
 	SyncPrivateData(ImageEffectHandle),
 

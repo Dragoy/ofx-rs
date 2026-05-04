@@ -223,6 +223,8 @@ impl MapAction for PluginDescriptor {
                 BeginInstanceChanged => map_args!(BeginInstanceChanged(in_args)),
                 InstanceChanged => map_args!(InstanceChanged(in_args)),
                 EndInstanceChanged => map_args!(EndInstanceChanged(in_args)),
+                BeginInstanceEdit => map_args!(BeginInstanceEdit()),
+                EndInstanceEdit => map_args!(EndInstanceEdit()),
                 DestroyInstance => map_args!(DestroyInstance()), // handled by the library
                 _ => Err(Error::InvalidAction),
             }
