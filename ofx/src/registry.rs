@@ -5,14 +5,111 @@ use result::*;
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::thread::{self, ThreadId};
 use types::*;
 
 #[derive(Default)]
 pub struct Registry {
-    plugins: Vec<PluginDescriptor>,
+    plugins: Vec<Arc<PluginSlot>>,
     plugin_modules: HashMap<String, usize>,
+}
+
+pub(crate) struct PluginSlot {
+    plugin: UnsafeCell<PluginDescriptor>,
+    dispatch_gate: DispatchGate,
+}
+
+// `Execute::execute` is a public `&mut self` API, but OFX hosts may synchronously
+// reenter `mainEntry` from the same thread. The gate serializes cross-thread
+// dispatch while allowing that same-thread recursion.
+unsafe impl Sync for PluginSlot {}
+unsafe impl Send for PluginSlot {}
+
+impl PluginSlot {
+    fn new(plugin: PluginDescriptor) -> Self {
+        Self {
+            plugin: UnsafeCell::new(plugin),
+            dispatch_gate: DispatchGate::new(),
+        }
+    }
+
+    fn get(&self) -> &PluginDescriptor {
+        unsafe { &*self.plugin.get() }
+    }
+
+    fn get_mut(&self) -> &mut PluginDescriptor {
+        unsafe { &mut *self.plugin.get() }
+    }
+
+    fn dispatch(&self, message: RawMessage) -> Result<Int> {
+        let _guard = self.dispatch_gate.enter();
+        self.get_mut().dispatch(message)
+    }
+}
+
+struct DispatchGate {
+    state: Mutex<DispatchGateState>,
+    available: Condvar,
+}
+
+struct DispatchGateState {
+    owner: Option<ThreadId>,
+    depth: usize,
+}
+
+struct DispatchGuard<'a> {
+    gate: &'a DispatchGate,
+}
+
+impl DispatchGate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(DispatchGateState {
+                owner: None,
+                depth: 0,
+            }),
+            available: Condvar::new(),
+        }
+    }
+
+    fn enter(&self) -> DispatchGuard<'_> {
+        let current_thread = thread::current().id();
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        while state.owner.map_or(false, |owner| owner != current_thread) {
+            state = self
+                .available
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+
+        state.owner = Some(current_thread);
+        state.depth += 1;
+
+        DispatchGuard { gate: self }
+    }
+}
+
+impl Drop for DispatchGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .gate
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        state.depth -= 1;
+        if state.depth == 0 {
+            state.owner = None;
+            self.gate.available.notify_one();
+        }
+    }
 }
 
 impl Registry {
@@ -46,7 +143,7 @@ impl Registry {
             main_entry,
         );
 
-        self.plugins.push(plugin);
+        self.plugins.push(Arc::new(PluginSlot::new(plugin)));
         plugin_index
     }
 
@@ -55,78 +152,115 @@ impl Registry {
     }
 
     pub fn get_plugin_mut(&mut self, index: usize) -> &mut PluginDescriptor {
-        &mut self.plugins[index as usize]
+        self.plugins[index as usize].get_mut()
     }
 
     pub fn get_plugin(&self, index: usize) -> &PluginDescriptor {
-        &self.plugins[index as usize]
+        self.plugins[index as usize].get()
     }
 
     pub fn ofx_plugin_ptr(&self, index: Int) -> *const OfxPlugin {
-        self.plugins[index as usize].ofx_plugin() as *const OfxPlugin
+        self.plugins[index as usize].get().ofx_plugin() as *const OfxPlugin
     }
 
     pub fn dispatch(&mut self, plugin_module: &str, message: RawMessage) -> Result<Int> {
         info!("{}:{:?}", plugin_module, message);
-        let found_plugin = self.plugin_modules.get(plugin_module).cloned();
-        if let Some(plugin_index) = found_plugin {
-            let plugin = self.get_plugin_mut(plugin_index);
-            plugin.dispatch(message)
-        } else {
-            Err(Error::PluginNotFound)
-        }
+        self.plugin_for_module(plugin_module)
+            .ok_or(Error::PluginNotFound)?
+            .dispatch(message)
+    }
+
+    fn plugin_for_module(&self, plugin_module: &str) -> Option<Arc<PluginSlot>> {
+        self.plugin_modules
+            .get(plugin_module)
+            .and_then(|plugin_index| self.plugins.get(*plugin_index))
+            .cloned()
     }
 }
 
 struct RegistryState {
-    lock: Mutex<()>,
-    registry: UnsafeCell<Option<Registry>>,
+    registry: RwLock<Option<Registry>>,
 }
-
-unsafe impl Sync for RegistryState {}
 
 impl RegistryState {
     const fn new() -> Self {
         Self {
-            lock: Mutex::new(()),
-            registry: UnsafeCell::new(None),
+            registry: RwLock::new(None),
         }
     }
 
     fn with_registry_mut<R>(&self, f: impl FnOnce(&mut Registry) -> R) -> R {
-        let _guard = self
-            .lock
-            .lock()
+        let mut registry = self
+            .registry
+            .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let registry = unsafe { &mut *self.registry.get() };
         let registry = registry.as_mut().expect("registry not initialized");
         f(registry)
     }
 
     fn with_registry<R>(&self, f: impl FnOnce(&Registry) -> R) -> R {
-        let _guard = self
-            .lock
-            .lock()
+        let registry = self
+            .registry
+            .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let registry = unsafe { &*self.registry.get() };
         let registry = registry.as_ref().expect("registry not initialized");
         f(registry)
+    }
+
+    fn with_plugin_for_main_entry<R>(
+        &self,
+        plugin_module: &str,
+        action: CharPtr,
+        f: impl FnOnce(&PluginSlot) -> R,
+    ) -> Result<R> {
+        if main_entry_requires_registry_mutation_lock(action) {
+            self.with_registry_mut(|registry| {
+                registry
+                    .plugin_for_module(plugin_module)
+                    .ok_or(Error::PluginNotFound)
+                    .map(|plugin| f(&plugin))
+            })
+        } else {
+            let plugin = self.with_registry(|registry| {
+                registry
+                    .plugin_for_module(plugin_module)
+                    .ok_or(Error::PluginNotFound)
+            })?;
+            Ok(f(&plugin))
+        }
+    }
+
+    fn dispatch_main_entry(
+        &self,
+        plugin_module: &str,
+        action: CharPtr,
+        handle: VoidPtr,
+        in_args: OfxPropertySetHandle,
+        out_args: OfxPropertySetHandle,
+    ) -> Result<Int> {
+        self.with_plugin_for_main_entry(plugin_module, action, |plugin| {
+            plugin.dispatch(RawMessage::MainEntry {
+                action,
+                handle,
+                in_args,
+                out_args,
+            })
+        })?
     }
 
     fn init<F>(&self, init_function: F)
     where
         F: Fn(&mut Registry),
     {
-        let _guard = self
-            .lock
-            .lock()
+        let mut slot = self
+            .registry
+            .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let slot = unsafe { &mut *self.registry.get() };
         if slot.is_none() {
             let mut registry = Registry::new();
             init_function(&mut registry);
             for plugin in &registry.plugins {
-                info!("Registered plugin {}", plugin);
+                info!("Registered plugin {}", plugin.get());
             }
             *slot = Some(registry);
         }
@@ -143,6 +277,15 @@ fn panic_payload_to_string(payload: &(dyn Any + Send)) -> String {
     } else {
         "<non-string panic payload>".to_owned()
     }
+}
+
+fn main_entry_requires_registry_mutation_lock(action: CharPtr) -> bool {
+    if action.is_null() {
+        return false;
+    }
+
+    let action = unsafe { CStr::from_ptr(action) }.to_bytes_with_nul();
+    action == kOfxActionLoad || action == kOfxActionUnload || action == kOfxActionDescribe
 }
 
 pub fn with_registry<R>(f: impl FnOnce(&Registry) -> R) -> R {
@@ -179,20 +322,10 @@ pub fn main_entry_for_plugin(
     out_args: OfxPropertySetHandle,
 ) -> Int {
     match catch_unwind(AssertUnwindSafe(|| {
-        with_registry_mut(|registry| {
-            registry
-                .dispatch(
-                    plugin_module,
-                    RawMessage::MainEntry {
-                        action,
-                        handle,
-                        in_args,
-                        out_args,
-                    },
-                )
-                .ok()
-                .unwrap_or(-1)
-        })
+        GLOBAL_REGISTRY
+            .dispatch_main_entry(plugin_module, action, handle, in_args, out_args)
+            .ok()
+            .unwrap_or(-1)
     })) {
         Ok(status) => status,
         Err(payload) => {
@@ -300,4 +433,85 @@ macro_rules! build_plugin_registry {
             })
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    #[derive(Default)]
+    struct NoopPlugin;
+
+    impl Execute for NoopPlugin {}
+
+    extern "C" fn noop_set_host(_host: *mut OfxHost) {}
+
+    extern "C" fn noop_main_entry(
+        _action: CharPtr,
+        _handle: VoidPtr,
+        _in_args: OfxPropertySetHandle,
+        _out_args: OfxPropertySetHandle,
+    ) -> Int {
+        eOfxStatus_OK
+    }
+
+    fn test_registry_state() -> RegistryState {
+        let state = RegistryState::new();
+        state.init(|registry| {
+            registry.add(
+                "test_module",
+                "net.ofx-rs.test",
+                ApiVersion(1),
+                PluginVersion(1, 0),
+                Box::new(NoopPlugin),
+                noop_set_host,
+                noop_main_entry,
+            );
+        });
+        state
+    }
+
+    fn action_ptr(action: &'static [u8]) -> CharPtr {
+        unsafe { CStr::from_bytes_with_nul_unchecked(action).as_ptr() }
+    }
+
+    #[test]
+    fn dispatch_gate_allows_same_thread_reentry() {
+        let gate = DispatchGate::new();
+        let _outer = gate.enter();
+        let _inner = gate.enter();
+    }
+
+    #[test]
+    fn normal_main_entry_lookup_releases_registry_lock_before_dispatch() {
+        let state = test_registry_state();
+        let action = action_ptr(kOfxActionInstanceChanged);
+
+        let result = state.with_plugin_for_main_entry("test_module", action, |_plugin| {
+            assert!(
+                state.registry.try_write().is_ok(),
+                "normal actions must dispatch outside the global registry lock"
+            );
+            eOfxStatus_OK
+        });
+
+        assert_eq!(result.unwrap(), eOfxStatus_OK);
+    }
+
+    #[test]
+    fn lifecycle_main_entry_lookup_keeps_registry_mutation_lock() {
+        let state = test_registry_state();
+        let action = action_ptr(kOfxActionDescribe);
+
+        let result = state.with_plugin_for_main_entry("test_module", action, |_plugin| {
+            assert!(
+                state.registry.try_write().is_err(),
+                "Describe must stay under the registry mutation lock"
+            );
+            eOfxStatus_OK
+        });
+
+        assert_eq!(result.unwrap(), eOfxStatus_OK);
+    }
 }
