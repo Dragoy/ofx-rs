@@ -600,6 +600,9 @@ properties_newtype!(GetRegionOfDefinitionOutArgs);
 properties_newtype!(GetRegionsOfInterestInArgs);
 properties_newtype!(GetRegionsOfInterestOutArgs);
 
+properties_newtype!(GetFramesNeededInArgs);
+properties_newtype!(GetFramesNeededOutArgs);
+
 properties_newtype!(GetClipPreferencesOutArgs);
 
 properties_newtype!(IsIdentityInArgs);

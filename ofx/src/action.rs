@@ -72,6 +72,11 @@ pub enum Action {
 		GetRegionsOfInterestInArgs,
 		GetRegionsOfInterestOutArgs,
 	),
+	GetFramesNeeded(
+		ImageEffectHandle,
+		GetFramesNeededInArgs,
+		GetFramesNeededOutArgs,
+	),
 
 	BeginInstanceChanged(ImageEffectHandle, BeginInstanceChangedInArgs),
 	InstanceChanged(ImageEffectHandle, InstanceChangedInArgs),
