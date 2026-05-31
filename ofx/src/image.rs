@@ -600,7 +600,7 @@ where
 		}
 	}
 
-	pub fn data(&self) -> ImageBuffer<T> {
+    pub fn data(&self) -> ImageBuffer<'_, T> {
 		self.data.clone()
 	}
 
@@ -628,7 +628,7 @@ where
 		self.data.row_mut(y)
 	}
 
-	pub fn data(&mut self) -> ImageBuffer<T> {
+    pub fn data(&mut self) -> ImageBuffer<'_, T> {
 		self.data.clone()
 	}
 

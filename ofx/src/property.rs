@@ -1599,6 +1599,14 @@ object_properties! { GetRegionsOfInterestOutArgs {
 	RegionOfInterest			write,
 }}
 
+object_properties! { GetFramesNeededInArgs {
+	TimeProp					read,
+}}
+
+object_properties! { GetFramesNeededOutArgs {
+	RawWritable					inherit,
+}}
+
 object_properties! { GetClipPreferencesOutArgs {
 	RawWritable					inherit,
 }}

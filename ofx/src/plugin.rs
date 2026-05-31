@@ -201,6 +201,7 @@ impl MapAction for PluginDescriptor {
                 DescribeInContext => map_args! { DescribeInContext(in_args) },
                 GetRegionOfDefinition => map_args! { GetRegionOfDefinition(in_args, out_args) },
                 GetRegionsOfInterest => map_args! { GetRegionsOfInterest(in_args, out_args) },
+                GetFramesNeeded => map_args! { GetFramesNeeded(in_args, out_args) },
                 IsIdentity => map_args! { IsIdentity(in_args, out_args) },
                 GetClipPreferences => map_args! { GetClipPreferences(out_args) },
                 GetTimeDomain => map_args!(GetTimeDomain(out_args)),
