@@ -686,6 +686,10 @@ impl HasProperties<EffectDescriptor> for ImageEffectHandle {
 }
 
 impl ImageEffectHandle {
+    pub fn instance_key(&self) -> usize {
+        self.inner as usize
+    }
+
     pub fn message_error(&self, id: &CStr, message: &CStr) -> Result<()> {
         let message_suite = self.message.as_ref().ok_or(Error::InvalidSuite)?;
         suite_fn!(message in message_suite;

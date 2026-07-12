@@ -663,6 +663,7 @@ mod tests {
             clearPersistentMessage: Some(capture_clear()),
         }));
 
+        assert_eq!(handle.instance_key(), 0x1234usize);
         assert!(handle.clear_persistent_message().unwrap());
         assert_eq!(captured_message().lock().unwrap().handle, 0x1234usize);
     }
