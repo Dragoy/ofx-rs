@@ -716,6 +716,17 @@ impl ImageEffectHandle {
         Ok(true)
     }
 
+    pub fn clear_persistent_message(&self) -> Result<bool> {
+        let Some(message_suite) = self.message_v2.as_ref() else {
+            return Ok(false);
+        };
+        let Some(clear_persistent_message) = message_suite.clearPersistentMessage else {
+            return Ok(false);
+        };
+        to_result!(unsafe { clear_persistent_message(self.inner as *mut _) })?;
+        Ok(true)
+    }
+
     fn clip_define(&self, clip_name: &[u8]) -> Result<ClipDescriptor> {
         let property_set_handle = {
             let mut property_set_handle = std::ptr::null_mut();

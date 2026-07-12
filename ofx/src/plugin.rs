@@ -553,6 +553,11 @@ mod tests {
         eOfxStatus_OK
     }
 
+    unsafe extern "C" fn capture_clear_impl(handle: *mut std::ffi::c_void) -> OfxStatus {
+        captured_message().lock().unwrap().handle = handle as usize;
+        eOfxStatus_OK
+    }
+
     fn capture_message() -> unsafe extern "C" fn(
         *mut std::ffi::c_void,
         *const i8,
@@ -563,6 +568,10 @@ mod tests {
         unsafe {
             std::mem::transmute(capture_message_impl as unsafe extern "C" fn(_, _, _, _) -> _)
         }
+    }
+
+    fn capture_clear() -> unsafe extern "C" fn(*mut std::ffi::c_void) -> OfxStatus {
+        capture_clear_impl
     }
 
     fn handle_with_message_suite(message_v2: Option<OfxMessageSuiteV2>) -> ImageEffectHandle {
@@ -641,6 +650,30 @@ mod tests {
         let message = CString::new("GPU connection drawing failed").unwrap();
 
         assert!(!handle.set_persistent_error(&id, &message).unwrap());
+        assert_eq!(*captured_message().lock().unwrap(), CapturedMessage::default());
+    }
+
+    #[test]
+    fn clear_persistent_message_forwards_to_v2() {
+        let _test_guard = message_test_lock().lock().unwrap();
+        *captured_message().lock().unwrap() = CapturedMessage::default();
+        let handle = handle_with_message_suite(Some(OfxMessageSuiteV2 {
+            message: None,
+            setPersistentMessage: None,
+            clearPersistentMessage: Some(capture_clear()),
+        }));
+
+        assert!(handle.clear_persistent_message().unwrap());
+        assert_eq!(captured_message().lock().unwrap().handle, 0x1234usize);
+    }
+
+    #[test]
+    fn clear_persistent_message_reports_missing_v2_without_calling_host() {
+        let _test_guard = message_test_lock().lock().unwrap();
+        *captured_message().lock().unwrap() = CapturedMessage::default();
+        let handle = handle_with_message_suite(None);
+
+        assert!(!handle.clear_persistent_message().unwrap());
         assert_eq!(*captured_message().lock().unwrap(), CapturedMessage::default());
     }
 }
