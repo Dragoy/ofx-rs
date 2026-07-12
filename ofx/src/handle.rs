@@ -13,6 +13,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use types::*;
 
+const OFX_MESSAGE_FORMAT: &[u8] = b"%s\0";
+
 #[derive(Debug, Clone)]
 pub struct PropertySetHandle {
     inner: OfxPropertySetHandle,
@@ -690,6 +692,7 @@ impl ImageEffectHandle {
             self.inner as *mut _,
             kOfxMessageError.as_ptr() as *const i8,
             id.as_ptr(),
+            OFX_MESSAGE_FORMAT.as_ptr() as *const i8,
             message.as_ptr())?;
         Ok(())
     }
@@ -706,6 +709,7 @@ impl ImageEffectHandle {
                 self.inner as *mut _,
                 kOfxMessageError.as_ptr() as *const i8,
                 id.as_ptr(),
+                OFX_MESSAGE_FORMAT.as_ptr() as *const i8,
                 message.as_ptr(),
             )
         })?;

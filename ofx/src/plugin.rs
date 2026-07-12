@@ -578,11 +578,11 @@ mod tests {
     }
 
     #[test]
-    fn message_error_forwards_error_type_id_and_text_to_v1() {
+    fn message_error_uses_safe_format_for_percent_text() {
         *captured_message().lock().unwrap() = CapturedMessage::default();
         let handle = handle_with_message_suite(None);
         let id = CString::new("TRC-GPU-CONNECTION-001").unwrap();
-        let message = CString::new("GPU connection drawing failed").unwrap();
+        let message = CString::new("GPU connection drawing failed: 100%").unwrap();
 
         handle.message_error(&id, &message).unwrap();
 
@@ -595,9 +595,34 @@ mod tests {
                     .to_bytes()
                     .to_vec(),
                 id: id.as_bytes().to_vec(),
-                text: message.as_bytes().to_vec(),
+                text: b"%s".to_vec(),
             }
         );
+    }
+
+    #[test]
+    fn set_persistent_error_forwards_to_v2() {
+        *captured_message().lock().unwrap() = CapturedMessage::default();
+        let handle = handle_with_message_suite(Some(OfxMessageSuiteV2 {
+            message: None,
+            setPersistentMessage: Some(capture_message()),
+            clearPersistentMessage: None,
+        }));
+        let id = CString::new("TRC-GPU-CONNECTION-001").unwrap();
+        let message = CString::new("GPU connection drawing failed: 100%").unwrap();
+
+        assert!(handle.set_persistent_error(&id, &message).unwrap());
+        let captured = captured_message().lock().unwrap();
+        assert_eq!(captured.handle, 0x1234usize);
+        assert_eq!(
+            captured.message_type,
+            CStr::from_bytes_with_nul(kOfxMessageError)
+                .unwrap()
+                .to_bytes()
+                .to_vec()
+        );
+        assert_eq!(captured.id, id.as_bytes());
+        assert_eq!(captured.text, b"%s");
     }
 
     #[test]
