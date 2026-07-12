@@ -62,6 +62,8 @@ pub struct ImageEffectHandle {
     image_effect: Arc<OfxImageEffectSuiteV1>,
     image_effect_opengl_render: Option<Arc<OfxImageEffectOpenGLRenderSuiteV1>>,
     parameter: Arc<OfxParameterSuiteV1>,
+    message: Option<Arc<OfxMessageSuiteV1>>,
+    message_v2: Option<Arc<OfxMessageSuiteV2>>,
 }
 
 #[derive(Clone)]
@@ -151,7 +153,19 @@ impl ImageEffectHandle {
             image_effect,
             image_effect_opengl_render,
             parameter,
+            message: None,
+            message_v2: None,
         }
+    }
+
+    pub(crate) fn with_message_suites(
+        mut self,
+        message: Arc<OfxMessageSuiteV1>,
+        message_v2: Option<Arc<OfxMessageSuiteV2>>,
+    ) -> Self {
+        self.message = Some(message);
+        self.message_v2 = message_v2;
+        self
     }
 }
 
@@ -670,6 +684,34 @@ impl HasProperties<EffectDescriptor> for ImageEffectHandle {
 }
 
 impl ImageEffectHandle {
+    pub fn message_error(&self, id: &CStr, message: &CStr) -> Result<()> {
+        let message_suite = self.message.as_ref().ok_or(Error::InvalidSuite)?;
+        suite_fn!(message in message_suite;
+            self.inner as *mut _,
+            kOfxMessageError.as_ptr() as *const i8,
+            id.as_ptr(),
+            message.as_ptr())?;
+        Ok(())
+    }
+
+    pub fn set_persistent_error(&self, id: &CStr, message: &CStr) -> Result<bool> {
+        let Some(message_suite) = self.message_v2.as_ref() else {
+            return Ok(false);
+        };
+        let Some(set_persistent_message) = message_suite.setPersistentMessage else {
+            return Ok(false);
+        };
+        to_result!(unsafe {
+            set_persistent_message(
+                self.inner as *mut _,
+                kOfxMessageError.as_ptr() as *const i8,
+                id.as_ptr(),
+                message.as_ptr(),
+            )
+        })?;
+        Ok(true)
+    }
+
     fn clip_define(&self, clip_name: &[u8]) -> Result<ClipDescriptor> {
         let property_set_handle = {
             let mut property_set_handle = std::ptr::null_mut();

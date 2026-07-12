@@ -425,7 +425,8 @@ impl PluginDescriptor {
             image_effect_suite,
             image_effect_opengl_render,
             parameter_suite,
-        ))
+        )
+        .with_message_suites(suites.message(), suites.message_v2()))
     }
 
     fn typed_properties<T, F>(&self, constructor: F, handle: OfxPropertySetHandle) -> Result<T>
@@ -512,5 +513,101 @@ impl PluginDescriptor {
 impl Plugin for PluginDescriptor {
     fn suites(&self) -> &Suites {
         &self.suites.as_ref().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct CapturedMessage {
+        handle: usize,
+        message_type: Vec<u8>,
+        id: Vec<u8>,
+        text: Vec<u8>,
+    }
+
+    fn captured_message() -> &'static Mutex<CapturedMessage> {
+        static CAPTURED: OnceLock<Mutex<CapturedMessage>> = OnceLock::new();
+        CAPTURED.get_or_init(|| Mutex::new(CapturedMessage::default()))
+    }
+
+    unsafe extern "C" fn capture_message_impl(
+        handle: *mut std::ffi::c_void,
+        message_type: *const i8,
+        id: *const i8,
+        format: *const i8,
+    ) -> OfxStatus {
+        let mut captured = captured_message().lock().unwrap();
+        captured.handle = handle as usize;
+        captured.message_type = unsafe { CStr::from_ptr(message_type) }.to_bytes().to_vec();
+        captured.id = unsafe { CStr::from_ptr(id) }.to_bytes().to_vec();
+        captured.text = unsafe { CStr::from_ptr(format) }.to_bytes().to_vec();
+        eOfxStatus_OK
+    }
+
+    fn capture_message() -> unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        *const i8,
+        *const i8,
+        *const i8,
+        ...,
+    ) -> OfxStatus {
+        unsafe {
+            std::mem::transmute(capture_message_impl as unsafe extern "C" fn(_, _, _, _) -> _)
+        }
+    }
+
+    fn handle_with_message_suite(message_v2: Option<OfxMessageSuiteV2>) -> ImageEffectHandle {
+        let message = OfxMessageSuiteV1 {
+            message: Some(capture_message()),
+        };
+        let property = Arc::new(unsafe { std::mem::zeroed() });
+        let image_effect = Arc::new(unsafe { std::mem::zeroed() });
+        let parameter = Arc::new(unsafe { std::mem::zeroed() });
+        ImageEffectHandle::new(
+            0x1234usize as OfxImageEffectHandle,
+            property,
+            image_effect,
+            None,
+            parameter,
+        )
+        .with_message_suites(Arc::new(message), message_v2.map(Arc::new))
+    }
+
+    #[test]
+    fn message_error_forwards_error_type_id_and_text_to_v1() {
+        *captured_message().lock().unwrap() = CapturedMessage::default();
+        let handle = handle_with_message_suite(None);
+        let id = CString::new("TRC-GPU-CONNECTION-001").unwrap();
+        let message = CString::new("GPU connection drawing failed").unwrap();
+
+        handle.message_error(&id, &message).unwrap();
+
+        assert_eq!(
+            *captured_message().lock().unwrap(),
+            CapturedMessage {
+                handle: 0x1234usize,
+                message_type: CStr::from_bytes_with_nul(kOfxMessageError)
+                    .unwrap()
+                    .to_bytes()
+                    .to_vec(),
+                id: id.as_bytes().to_vec(),
+                text: message.as_bytes().to_vec(),
+            }
+        );
+    }
+
+    #[test]
+    fn set_persistent_error_reports_missing_v2_without_calling_v1() {
+        *captured_message().lock().unwrap() = CapturedMessage::default();
+        let handle = handle_with_message_suite(None);
+        let id = CString::new("TRC-GPU-CONNECTION-001").unwrap();
+        let message = CString::new("GPU connection drawing failed").unwrap();
+
+        assert!(!handle.set_persistent_error(&id, &message).unwrap());
+        assert_eq!(*captured_message().lock().unwrap(), CapturedMessage::default());
     }
 }

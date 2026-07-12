@@ -76,4 +76,12 @@ impl Suites {
     pub fn parameter(&self) -> Arc<OfxParameterSuiteV1> {
         self.parameter.clone()
     }
+
+    pub(crate) fn message(&self) -> Arc<OfxMessageSuiteV1> {
+        self.message.clone()
+    }
+
+    pub(crate) fn message_v2(&self) -> Option<Arc<OfxMessageSuiteV2>> {
+        self.message_v2.clone()
+    }
 }
