@@ -534,6 +534,11 @@ mod tests {
         CAPTURED.get_or_init(|| Mutex::new(CapturedMessage::default()))
     }
 
+    fn message_test_lock() -> &'static Mutex<()> {
+        static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        TEST_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
     unsafe extern "C" fn capture_message_impl(
         handle: *mut std::ffi::c_void,
         message_type: *const i8,
@@ -579,6 +584,7 @@ mod tests {
 
     #[test]
     fn message_error_uses_safe_format_for_percent_text() {
+        let _test_guard = message_test_lock().lock().unwrap();
         *captured_message().lock().unwrap() = CapturedMessage::default();
         let handle = handle_with_message_suite(None);
         let id = CString::new("TRC-GPU-CONNECTION-001").unwrap();
@@ -602,6 +608,7 @@ mod tests {
 
     #[test]
     fn set_persistent_error_forwards_to_v2() {
+        let _test_guard = message_test_lock().lock().unwrap();
         *captured_message().lock().unwrap() = CapturedMessage::default();
         let handle = handle_with_message_suite(Some(OfxMessageSuiteV2 {
             message: None,
@@ -627,6 +634,7 @@ mod tests {
 
     #[test]
     fn set_persistent_error_reports_missing_v2_without_calling_v1() {
+        let _test_guard = message_test_lock().lock().unwrap();
         *captured_message().lock().unwrap() = CapturedMessage::default();
         let handle = handle_with_message_suite(None);
         let id = CString::new("TRC-GPU-CONNECTION-001").unwrap();
