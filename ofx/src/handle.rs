@@ -686,7 +686,7 @@ impl HasProperties<EffectDescriptor> for ImageEffectHandle {
 }
 
 impl ImageEffectHandle {
-    pub fn instance_key(&self) -> usize {
+    pub fn identity(&self) -> usize {
         self.inner as usize
     }
 
