@@ -13,6 +13,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use types::*;
 
+const OFX_MESSAGE_FORMAT: &[u8] = b"%s\0";
+
 #[derive(Debug, Clone)]
 pub struct PropertySetHandle {
     inner: OfxPropertySetHandle,
@@ -62,6 +64,8 @@ pub struct ImageEffectHandle {
     image_effect: Arc<OfxImageEffectSuiteV1>,
     image_effect_opengl_render: Option<Arc<OfxImageEffectOpenGLRenderSuiteV1>>,
     parameter: Arc<OfxParameterSuiteV1>,
+    message: Option<Arc<OfxMessageSuiteV1>>,
+    message_v2: Option<Arc<OfxMessageSuiteV2>>,
 }
 
 #[derive(Clone)]
@@ -151,7 +155,19 @@ impl ImageEffectHandle {
             image_effect,
             image_effect_opengl_render,
             parameter,
+            message: None,
+            message_v2: None,
         }
+    }
+
+    pub(crate) fn with_message_suites(
+        mut self,
+        message: Arc<OfxMessageSuiteV1>,
+        message_v2: Option<Arc<OfxMessageSuiteV2>>,
+    ) -> Self {
+        self.message = Some(message);
+        self.message_v2 = message_v2;
+        self
     }
 }
 
@@ -670,6 +686,51 @@ impl HasProperties<EffectDescriptor> for ImageEffectHandle {
 }
 
 impl ImageEffectHandle {
+    pub fn identity(&self) -> usize {
+        self.inner as usize
+    }
+
+    pub fn message_error(&self, id: &CStr, message: &CStr) -> Result<()> {
+        let message_suite = self.message.as_ref().ok_or(Error::InvalidSuite)?;
+        suite_fn!(message in message_suite;
+            self.inner as *mut _,
+            kOfxMessageError.as_ptr() as *const i8,
+            id.as_ptr(),
+            OFX_MESSAGE_FORMAT.as_ptr() as *const i8,
+            message.as_ptr())?;
+        Ok(())
+    }
+
+    pub fn set_persistent_error(&self, id: &CStr, message: &CStr) -> Result<bool> {
+        let Some(message_suite) = self.message_v2.as_ref() else {
+            return Ok(false);
+        };
+        let Some(set_persistent_message) = message_suite.setPersistentMessage else {
+            return Ok(false);
+        };
+        to_result!(unsafe {
+            set_persistent_message(
+                self.inner as *mut _,
+                kOfxMessageError.as_ptr() as *const i8,
+                id.as_ptr(),
+                OFX_MESSAGE_FORMAT.as_ptr() as *const i8,
+                message.as_ptr(),
+            )
+        })?;
+        Ok(true)
+    }
+
+    pub fn clear_persistent_message(&self) -> Result<bool> {
+        let Some(message_suite) = self.message_v2.as_ref() else {
+            return Ok(false);
+        };
+        let Some(clear_persistent_message) = message_suite.clearPersistentMessage else {
+            return Ok(false);
+        };
+        to_result!(unsafe { clear_persistent_message(self.inner as *mut _) })?;
+        Ok(true)
+    }
+
     fn clip_define(&self, clip_name: &[u8]) -> Result<ClipDescriptor> {
         let property_set_handle = {
             let mut property_set_handle = std::ptr::null_mut();
