@@ -86,6 +86,7 @@ pub struct PluginDescriptor {
     suites: Option<Suites>,
     cached_handle: Option<ImageEffectHandle>,
     instance: Box<dyn Execute>,
+    thread_safe_dispatch: bool,
     global_action_index: EnumIndex<GlobalAction>,
     image_effect_action_index: EnumIndex<ImageEffectAction>,
     ofx_plugin: OfxPlugin, // need an owned copy for the lifetime of the plugin
@@ -391,17 +392,48 @@ impl PluginDescriptor {
         image_effect_add!(InvokeAbout);
         image_effect_add!(VegasKeyframeUplift);
 
+        let thread_safe_dispatch = instance.thread_safe_dispatch();
         PluginDescriptor {
             plugin_index,
             module_name: module_name.to_owned(),
             plugin_id,
             instance,
+            thread_safe_dispatch,
             host: None,
             suites: None,
             cached_handle: None,
             global_action_index,
             image_effect_action_index,
             ofx_plugin,
+        }
+    }
+
+    pub(crate) fn thread_safe_dispatch(&self) -> bool {
+        self.thread_safe_dispatch
+    }
+
+    /// Dispatches a main-entry action other than Load, Unload and Describe through
+    /// [`Execute::execute_shared`], without exclusive access to the descriptor.
+    pub(crate) fn dispatch_shared(
+        &self,
+        action: CharPtr,
+        handle: VoidPtr,
+        in_args: OfxPropertySetHandle,
+        out_args: OfxPropertySetHandle,
+    ) -> Result<Int> {
+        let mut mapped_action = self.map_action(action, handle, in_args, out_args)?;
+        if let (Some(host), Some(suites)) = (self.host, self.suites.clone()) {
+            let plugin_context = PluginContext {
+                host: ImageEffectHost::new(host.host, suites.property()),
+                suites,
+            };
+            let status = self.instance.execute_shared(&plugin_context, &mut mapped_action);
+            if let Action::DestroyInstance(effect) = &mut mapped_action {
+                effect.drop_instance_data()?;
+            }
+            status
+        } else {
+            OK
         }
     }
 

@@ -24,7 +24,11 @@ pub(crate) struct PluginSlot {
 
 // `Execute::execute` is a public `&mut self` API, but OFX hosts may synchronously
 // reenter `mainEntry` from the same thread. The gate serializes cross-thread
-// dispatch while allowing that same-thread recursion.
+// dispatch while allowing that same-thread recursion. A plugin whose
+// `Execute::thread_safe_dispatch` is true takes every action but SetHost, Load,
+// Unload and Describe through `execute_shared` instead, without the gate: those
+// four are the only ones that mutate the descriptor, and hosts send them before
+// the first instance exists or after the last one is gone.
 unsafe impl Sync for PluginSlot {}
 unsafe impl Send for PluginSlot {}
 
@@ -45,8 +49,28 @@ impl PluginSlot {
     }
 
     fn dispatch(&self, message: RawMessage) -> Result<Int> {
+        if bypasses_dispatch_gate(self.get().thread_safe_dispatch(), &message) {
+            if let RawMessage::MainEntry {
+                action,
+                handle,
+                in_args,
+                out_args,
+            } = message
+            {
+                return self.get().dispatch_shared(action, handle, in_args, out_args);
+            }
+        }
         let _guard = self.dispatch_gate.enter();
         self.get_mut().dispatch(message)
+    }
+}
+
+fn bypasses_dispatch_gate(thread_safe_dispatch: bool, message: &RawMessage) -> bool {
+    match message {
+        RawMessage::MainEntry { action, .. } => {
+            thread_safe_dispatch && !main_entry_requires_registry_mutation_lock(*action)
+        }
+        RawMessage::SetHost { .. } => false,
     }
 }
 
@@ -513,5 +537,34 @@ mod tests {
         });
 
         assert_eq!(result.unwrap(), eOfxStatus_OK);
+    }
+
+    fn main_entry(action: &'static [u8]) -> RawMessage {
+        RawMessage::MainEntry {
+            action: action_ptr(action),
+            handle: std::ptr::null(),
+            in_args: std::ptr::null_mut(),
+            out_args: std::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn only_thread_safe_plugins_bypass_the_gate_and_never_for_lifecycle_actions() {
+        let lifecycle: [&'static [u8]; 3] = [kOfxActionLoad, kOfxActionUnload, kOfxActionDescribe];
+        let instance: [&'static [u8]; 4] = [
+            kOfxActionCreateInstance,
+            kOfxActionInstanceChanged,
+            kOfxImageEffectActionGetFramesNeeded,
+            kOfxImageEffectActionRender,
+        ];
+        for action in lifecycle.iter() {
+            assert!(!bypasses_dispatch_gate(true, &main_entry(action)));
+        }
+        for action in instance.iter() {
+            assert!(bypasses_dispatch_gate(true, &main_entry(action)));
+            assert!(!bypasses_dispatch_gate(false, &main_entry(action)));
+        }
+        let host = unsafe { std::mem::zeroed::<OfxHost>() };
+        assert!(!bypasses_dispatch_gate(true, &RawMessage::SetHost { host }));
     }
 }

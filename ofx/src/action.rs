@@ -107,6 +107,17 @@ pub trait Execute {
 	fn execute(&mut self, context: &PluginContext, action: &mut Action) -> Result<Int> {
 		Ok(eOfxStatus_OK)
 	}
+
+	/// Whether [`Execute::execute_shared`] handles every action except Load, Unload and
+	/// Describe from any thread, concurrently and reentrantly. Such a plugin skips the
+	/// per-plugin dispatch gate for those actions.
+	fn thread_safe_dispatch(&self) -> bool {
+		false
+	}
+
+	fn execute_shared(&self, context: &PluginContext, action: &mut Action) -> Result<Int> {
+		Err(Error::Unimplemented)
+	}
 }
 
 pub trait Filter {
