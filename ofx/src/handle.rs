@@ -845,6 +845,19 @@ impl ImageEffectHandle {
         }
     }
 
+    /// Shared access to the instance data, for plugins that dispatch actions concurrently.
+    /// `T` must be the type passed to [`ImageEffectHandle::set_instance_data`].
+    pub fn instance_data<T>(&self) -> Result<&T>
+    where
+        T: Sized + Sync,
+    {
+        let ptr = self.get_instance_data_ptr()?;
+        if ptr.is_null() {
+            return Err(Error::InvalidHandle);
+        }
+        Ok(unsafe { &*(ptr as *const T) })
+    }
+
     pub fn drop_instance_data(&mut self) -> Result<()> {
         unsafe {
             let mut ptr = self.get_instance_data_ptr()?;
